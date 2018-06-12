@@ -7,6 +7,7 @@
 #include "proc.h"
 #include "spinlock.h"
 
+int qttickets = 0;
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
@@ -90,7 +91,7 @@ found:
   p->pid = nextpid++;
   
   p->tickets = 10;
-  
+  qttickets+=10;
   p->create_time=ticks;
   p->sleep_time=0;
   p->running_time=0;
@@ -148,6 +149,7 @@ userinit(void)
   p->tf->esp = PGSIZE;
   p->tf->eip = 0;  // beginning of initcode.S
 
+  p->tickets = 10;
   safestrcpy(p->name, "initcode", sizeof(p->name));
   p->cwd = namei("/");
 
@@ -321,6 +323,29 @@ wait(void)
   }
 }
 
+static
+unsigned long
+lcg_rand(unsigned long a)
+{
+ return (a*279470273UL) % 4294967291UL;
+}
+
+void totaltickets(void){
+
+struct proc *p;
+int total = 0;
+for(p=ptable.proc;p<&ptable.proc[NPROC];p++) {
+
+if(p->state == RUNNABLE) {
+
+total += p->tickets;
+
+}
+}
+qttickets = total;
+}
+
+
 //PAGEBREAK: 42
 // Per-CPU process scheduler.
 // Each CPU calls scheduler() after setting itself up.
@@ -333,23 +358,33 @@ void
 scheduler(void)
 {
 
-  struct proc *p, *selected_p;
+  int seed,sum;
+  struct proc *p;
   struct cpu *c = mycpu();
-  int select;
-  int min;
+  int random;
+ 
  
   c->proc = 0;
-  selected_p = ptable.proc;
+  seed = 0;
   for(;;)
   {  
     // Enable interrupts on this processor.
     sti();
+    seed++;
+    sum=0;
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
-    
-    min = 1 << 30;
-    select = 0;
+    totaltickets();
+    random = lcg_rand(lcg_rand(seed*ticks));
+
+    if(qttickets > 0)
+	random %= qttickets;
+    else
+	random = 0;
+
+    if(random < 0)
+	random = random * -1;
          
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
       
@@ -362,26 +397,12 @@ scheduler(void)
 	  
 	  if(p->state != RUNNABLE)
 		  continue;
-      
-      if(p->pass < min)
-      {
-        min = p->pass;
-        selected_p = p;
-        select = 1;
-      }
-     }
-      
-      if(select)
-      {
-        if(selected_p->first_assigned==0)
-            selected_p->first_assigned = ticks;
-      //  if (selected_p->pass > 0)
-        
-    //      cprintf("%s:p=%d,s=%d\n",selected_p->name, selected_p->pass, selected_p->stride);
-        
-        p = selected_p;
-        p->pass += p->stride;
-       
+
+	if(p->tickets + sum <=random){
+		sum += p->tickets;
+		continue;
+	}
+   
         p->ticks++;
 
         // Switch to chosen process.  It is the process's job
@@ -397,6 +418,7 @@ scheduler(void)
         // Process is done running for now.
         // It should have changed its p->state before coming back.
         c->proc = 0;
+	break;
      }
      
      release(&ptable.lock);
@@ -626,3 +648,25 @@ int set_tickets_proc(int tickets)
  
   return 0;
 }
+
+int
+lotto(int tickets)
+{
+int i;
+struct proc *p;
+
+acquire(&ptable.lock);
+for(i=0;i<NPROC;i++)
+{
+p=myproc();
+if(p->state ==UNUSED)
+return -1;
+p->tickets = tickets;
+release(&ptable.lock);
+return 0;
+}
+
+release(&ptable.lock);
+return -1;
+}
+

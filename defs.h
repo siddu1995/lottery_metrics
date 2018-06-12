@@ -122,6 +122,8 @@ void            wakeup(void*);
 void            yield(void);
 int 		info_proc(int);
 int             set_tickets_proc(int);
+int		lotto(int);
+
 // swtch.S
 void            swtch(struct context**, struct context*);
 

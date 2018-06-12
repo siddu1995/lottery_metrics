@@ -18,8 +18,8 @@ int main(int argc, char* argv[])
   else
     tickets = 250;
   
-  set_tickets(tickets);
-  
+  //set_tickets(tickets);
+  lotto(tickets);
   int i,k;
   const int loop=43000;
   for(i=0; i<loop; i++)

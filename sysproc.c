@@ -107,3 +107,12 @@ sys_set_tickets(int tickets)
 
  return set_tickets_proc(tickets);
 }
+
+int 
+sys_lotto(void)
+{
+int tickets;
+if(argint(0,&tickets)<0)
+return -1;
+return lotto(tickets);
+}
