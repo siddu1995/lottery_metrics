@@ -89,3 +89,21 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+int
+sys_info(int param)
+{
+  int value;
+  argint(0, &param);
+ 
+  value = info_proc(param);
+
+  return value;
+}
+int
+sys_set_tickets(int tickets)
+{
+ argint(0, &tickets);
+
+ return set_tickets_proc(tickets);
+}

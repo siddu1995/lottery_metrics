@@ -13,7 +13,7 @@ struct {
 } ptable;
 
 static struct proc *initproc;
-
+//static int total_tickets = 0;
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
@@ -88,6 +88,15 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  
+  p->tickets = 10;
+  
+  p->create_time=ticks;
+  p->sleep_time=0;
+  p->running_time=0;
+  p->runnable_time=0;
+  p->termination_time=0;
+  p->first_assigned = 0;
 
   release(&ptable.lock);
 
@@ -230,7 +239,8 @@ exit(void)
   struct proc *curproc = myproc();
   struct proc *p;
   int fd;
-
+  
+  curproc->termination_time = ticks;
   if(curproc == initproc)
     panic("init exiting");
 
@@ -322,35 +332,74 @@ wait(void)
 void
 scheduler(void)
 {
-  struct proc *p;
+
+  struct proc *p, *selected_p;
   struct cpu *c = mycpu();
+  int select;
+  int min;
+ 
   c->proc = 0;
-  
-  for(;;){
+  selected_p = ptable.proc;
+  for(;;)
+  {  
     // Enable interrupts on this processor.
     sti();
 
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
+    
+    min = 1 << 30;
+    select = 0;
+         
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-      if(p->state != RUNNABLE)
-        continue;
+      
+	  switch(p->state)
+	  {
+	  case SLEEPING: p->sleep_time++; break;
+	  case RUNNABLE: p->runnable_time++; break;
+	  default:break;
+	  }
+	  
+	  if(p->state != RUNNABLE)
+		  continue;
+      
+      if(p->pass < min)
+      {
+        min = p->pass;
+        selected_p = p;
+        select = 1;
+      }
+     }
+      
+      if(select)
+      {
+        if(selected_p->first_assigned==0)
+            selected_p->first_assigned = ticks;
+      //  if (selected_p->pass > 0)
+        
+    //      cprintf("%s:p=%d,s=%d\n",selected_p->name, selected_p->pass, selected_p->stride);
+        
+        p = selected_p;
+        p->pass += p->stride;
+       
+        p->ticks++;
 
-      // Switch to chosen process.  It is the process's job
-      // to release ptable.lock and then reacquire it
-      // before jumping back to us.
-      c->proc = p;
-      switchuvm(p);
-      p->state = RUNNING;
+        // Switch to chosen process.  It is the process's job
+        // to release ptable.lock and then reacquire it
+        // before jumping back to us.
+        c->proc = p;
+        switchuvm(p);
+        p->state = RUNNING;
 
-      swtch(&(c->scheduler), p->context);
-      switchkvm();
+        swtch(&(c->scheduler), p->context);
+        switchkvm();
 
-      // Process is done running for now.
-      // It should have changed its p->state before coming back.
-      c->proc = 0;
-    }
-    release(&ptable.lock);
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
+     }
+     
+     release(&ptable.lock);
 
   }
 }
@@ -531,4 +580,49 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+int 
+info_proc(int param)
+{
+  struct proc *curproc = myproc();
+  struct proc *p;
+  int process_count = 0;
+  
+  acquire(&ptable.lock);
+
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+      if(p->state != ZOMBIE && p->state != UNUSED)
+          process_count++;
+ 
+  switch(param)
+  {
+   case 1: release(&ptable.lock);return process_count;
+   case 2: release(&ptable.lock); return (curproc->syscall_count);
+   case 3: release(&ptable.lock); return (PGROUNDUP(curproc->sz)/PGSIZE);
+   case 4: {
+            cprintf("pname\ttickets\tticks\twait\tcreate\tfirst\n");
+            for (p = ptable.proc; p < &ptable.proc[NPROC]; p++)
+                 if (p->state != ZOMBIE && p->state != UNUSED)
+                     cprintf("%s\t%d\t%d\t%d\t%d\t%d\n", p->name,p->tickets, p->ticks, p->runnable_time+p->sleep_time, p->create_time, p->first_assigned);
+            release(&ptable.lock); 
+            cprintf("*********\n");
+            return (curproc->ticks);
+            }
+  }
+  
+  release(&ptable.lock);
+  return -1;
+}
+
+int set_tickets_proc(int tickets)
+{
+  struct proc *curproc = myproc();
+   
+  curproc->tickets = tickets;
+  curproc->ticks = 0;
+  curproc->stride = 10000/tickets;
+  curproc->pass = curproc->stride; 
+ 
+  return 0;
 }
